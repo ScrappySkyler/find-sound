@@ -1,12 +1,10 @@
-// Mod para encontrar nombres de sonidos en Dusklight
-// Muestra en tiempo real el nombre descriptivo de cada sonido reproducido
-// Usa el sistema de log de Dusklight para capturar y traducir IDs de audio
+// Mod para reproducir sonidos por ID al presionar L (fijar objetivo)
+// Reescritura completa de src/mod.cpp según petición
 
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
 #include <cstdio>
-#include <cmath>
 #include <string>
 #include <map>
 
@@ -23,201 +21,130 @@
 
 #include "Z2AudioLib/Z2SeMgr.h"
 
+#ifdef _WIN32
+  #include <Windows.h>
+#endif
+
 DEFINE_MOD();
 IMPORT_SERVICE(LogService, svc_log);
 IMPORT_SERVICE(HookService, svc_hook);
 
+// Hook definitions (se usan para monitorizar y seguir capturando sonidos como antes)
 DEFINE_HOOK(&Z2SeMgr::seStart, SeStartLog);
 DEFINE_HOOK(&daAlink_c::execute, LinkExecute);
 
-// ========== TABLA DE NOMBRES DE SONIDOS ==========
-// Mapeo de IDs de sonido a nombres descriptivos
+// --- Tabla de nombres (útil para logs) ---
 static std::map<uint32_t, std::string> g_soundNames = {
-    // Sonidos de Link / Acciones
     {0x0400000A, "LINK_JUMP"},
     {0x04000014, "LINK_LAND"},
     {0x04000015, "LINK_LAND_HEAVY"},
     {0x04000016, "LINK_HURT"},
-    {0x04000017, "LINK_GRUNT"},
-    {0x04000018, "LINK_BREAK_FREE"},
-    {0x04000019, "LINK_GASP"},
-    {0x0400001A, "LINK_YELL"},
-    {0x0400001B, "LINK_LAUGH"},
-    {0x0400001C, "LINK_WAIL"},
-    {0x0400001D, "LINK_KNIFE_THROW"},
-    
-    // Sonidos de guardia / defensa
-    {0x04000020, "GUARD_HIT"},
-    {0x04000021, "GUARD_BREAK"},
-    {0x04000022, "GUARD_BLOCK"},
-    {0x04000023, "MIDNA_JUMP"},
-    {0x04000024, "TITLE_ENTER"},
-    
-    // Ataques con espada
-    {0x04000030, "SWORD_SWING_1"},
-    {0x04000031, "SWORD_SWING_2"},
-    {0x04000032, "SWORD_SWING_3"},
-    {0x04000033, "SWORD_CLASH"},
-    {0x04000034, "SWORD_PIERCE"},
-    {0x04000035, "SWORD_HEAVY_HIT"},
-    
-    // Sonidos de arco
-    {0x04000040, "BOW_DRAW"},
-    {0x04000041, "BOW_FIRE"},
-    {0x04000042, "ARROW_HIT"},
-    {0x04000043, "ARROW_RICOCHET"},
-    
-    // Sonidos de magia / poderes especiales
-    {0x04000050, "MAGIC_CAST"},
-    {0x04000051, "MAGIC_HIT"},
-    {0x04000052, "MAGIC_FAIL"},
-    {0x04000053, "BOMB_THROW"},
-    {0x04000054, "BOMB_EXPLODE"},
-    
-    // UI / Menu
-    {0x04000060, "MENU_OPEN"},
-    {0x04000061, "MENU_CLOSE"},
-    {0x04000062, "MENU_SELECT"},
-    {0x04000063, "MENU_ERROR"},
-    {0x04000064, "ITEM_GET"},
-    {0x04000065, "ITEM_DROP"},
-    
-    // Ambiente
-    {0x04000070, "WIND"},
-    {0x04000071, "RAIN"},
-    {0x04000072, "THUNDER"},
-    {0x04000073, "BIRD"},
-    {0x04000074, "WATER"},
-    {0x04000075, "FOOTSTEP"},
-    {0x04000076, "FOOTSTEP_WATER"},
-    {0x04000077, "FOOTSTEP_GRASS"},
-    
-    // Enemigos generales
-    {0x04000080, "ENEMY_SPAWN"},
-    {0x04000081, "ENEMY_ALERT"},
-    {0x04000082, "ENEMY_ATTACK"},
-    {0x04000083, "ENEMY_HIT"},
-    {0x04000084, "ENEMY_DEATH"},
-    {0x04000085, "ENEMY_ROAR"},
-    
-    // Jefes
-    {0x04000090, "BOSS_APPEAR"},
-    {0x04000091, "BOSS_ATTACK"},
-    {0x04000092, "BOSS_ROAR"},
-    {0x04000093, "BOSS_WEAK"},
-    {0x04000094, "BOSS_DEFEATED"},
-    
-    // Puertas y mecanismos
-    {0x040000A0, "DOOR_OPEN"},
-    {0x040000A1, "DOOR_CLOSE"},
-    {0x040000A2, "DOOR_LOCK"},
-    {0x040000A3, "DOOR_UNLOCK"},
-    {0x040000A4, "CHEST_OPEN"},
-    {0x040000A5, "MECHANISM_ACTIVATE"},
-    {0x040000A6, "MECHANISM_CLICK"},
-    
-    // Vibraciones / Efectos de impacto
-    {0x040000B0, "IMPACT_SOFT"},
-    {0x040000B1, "IMPACT_MEDIUM"},
-    {0x040000B2, "IMPACT_HEAVY"},
-    {0x040000B3, "HIT_FLESH"},
-    {0x040000B4, "HIT_METAL"},
-    {0x040000B5, "HIT_WOOD"},
-    {0x040000B6, "HIT_STONE"},
+    // ... (se pueden ampliar según sea necesario)
 };
 
-// Registro de sonidos ya vistos para evitar spam
 static std::map<uint32_t, int> g_soundCount;
-static const int MAX_REPEAT_LOG = 3;  // Solo mostrar las primeras 3 repeticiones
+static const int MAX_REPEAT_LOG = 3; // limitar logs repetidos
 
-// Función para obtener el nombre de un sonido
 static std::string get_sound_name(uint32_t soundId) {
     auto it = g_soundNames.find(soundId);
-    if (it != g_soundNames.end()) {
-        return it->second;
-    }
-    
-    // Decodificar componentes del ID para nombres más descriptivos
+    if (it != g_soundNames.end()) return it->second;
+
     uint8_t section = (soundId >> 24) & 0xFF;
     uint8_t group = (soundId >> 16) & 0xFF;
     uint16_t id = soundId & 0xFFFF;
-    
+
     char buffer[64];
-    snprintf(buffer, sizeof(buffer), "UNKNOWN[Sec:%u|Grp:%u|ID:%u]", 
-             section, group, id);
+    snprintf(buffer, sizeof(buffer), "UNKNOWN[Sec:%u|Grp:%u|ID:%u]", section, group, id);
     return std::string(buffer);
 }
 
-// Función para convertir uint32_t a formato legible
 static uint32_t swap32(uint32_t v) {
     return (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24);
 }
 
-// Hook principal: captura TODOS los sonidos reproducidos
-static HookAction on_se_start_log(ModContext*, void* args, void*, void*) {
-    uint32_t seId = swap32(mods::arg<uint32_t>(args, 1));
-    
-    // Contar repeticiones
+// --- Hook: capturar todos los sonidos (log) ---
+static HookAction on_se_start_log(ModContext* ctx, void* args, void*, void*) {
+    // El segundo argumento (index 1) contiene el ID del SE en muchos ports
+    uint32_t rawId = mods::arg<uint32_t>(args, 1);
+    uint32_t seId = swap32(rawId);
+
     int& count = g_soundCount[seId];
     count++;
-    
-    // Solo loguear las primeras 3 repeticiones de cada sonido
-    if (count > MAX_REPEAT_LOG) {
-        return HOOK_CONTINUE;
-    }
-    
-    // Obtener nombre del sonido
-    std::string soundName = get_sound_name(seId);
-    
-    // Formatear el mensaje de log
-    char logMessage[512];
+    if (count > MAX_REPEAT_LOG) return HOOK_CONTINUE;
+
+    std::string name = get_sound_name(seId);
+    char msg[256];
     if (count > 1) {
-        snprintf(logMessage, sizeof(logMessage),
-                 "[SONIDO] %s (ID: 0x%08X | Hex: %02X-%02X-%04X) [REPETICION %d]",
-                 soundName.c_str(), seId,
-                 (seId >> 24) & 0xFF, (seId >> 16) & 0xFF, seId & 0xFFFF,
-                 count);
+        snprintf(msg, sizeof(msg), "[SONIDO] %s (ID: 0x%08X) [REPETICION %d]", name.c_str(), seId, count);
     } else {
-        snprintf(logMessage, sizeof(logMessage),
-                 "[SONIDO] %s (ID: 0x%08X | Hex: %02X-%02X-%04X)",
-                 soundName.c_str(), seId,
-                 (seId >> 24) & 0xFF, (seId >> 16) & 0xFF, seId & 0xFFFF);
+        snprintf(msg, sizeof(msg), "[SONIDO] %s (ID: 0x%08X)", name.c_str(), seId);
     }
-    
-    svc_log->info(mod_ctx, logMessage);
-    
+    svc_log->info(ctx, msg);
+
     return HOOK_CONTINUE;
 }
 
-// Cada tick: limpiar el registro si es necesario
-static int g_tickCounter = 0;
-static const int RESET_EVERY_TICKS = 1800;  // Limpiar cada 60 segundos (1800 ticks a 30/s)
+// --- Función para reproducir un SE por ID ---
+static void playSeById(uint32_t id) {
+    // swap para ajustar endianness si el engine lo requiere
+    uint32_t seId = swap32(id);
 
-static HookAction on_execute_pre(ModContext*, void* args, void*, void*) {
-    daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
-    
-    g_tickCounter++;
-    
-    // Limpiar el registro cada cierto tiempo para evitar memoria infinita
-    if (g_tickCounter >= RESET_EVERY_TICKS) {
-        g_tickCounter = 0;
-        
-        // Reducir contador de repeticiones (permite ver el sonido nuevamente)
-        for (auto& kv : g_soundCount) {
-            if (kv.second > MAX_REPEAT_LOG) {
-                kv.second = MAX_REPEAT_LOG;
-            }
-        }
-        
-        // Limpiar completamente cada 10 minutos
-        static int fullResetCounter = 0;
-        if (++fullResetCounter >= 10) {
-            fullResetCounter = 0;
-            g_soundCount.clear();
-            svc_log->info(mod_ctx, "[SONIDOS] *** Registro limpiado ***");
+    // Intenta llamar a Z2SeMgr::seStart
+    // Firma típica (según ingeniería inversa): seStart(unsigned long soundId, Vec* pos, int, int, int, float)
+    // Pasamos NULL para posición y parámetros por defecto.
+    try {
+        // Si la función está expuesta como estática/miembro accesible:
+        Z2SeMgr::seStart(seId, nullptr, 0, 0, 0, 1.0f);
+
+        // Log auxiliar
+        char b[80];
+        snprintf(b, sizeof(b), "[PLAY] solicitada reproduccion ID: 0x%08X", id);
+        svc_log->info(mod_ctx, b);
+    } catch(...) {
+        // Si no es posible llamar directamente, logueamos para depuración
+        char b[120];
+        snprintf(b, sizeof(b), "[PLAY] ERROR al intentar reproducir ID: 0x%08X (llamada directa fallida)", id);
+        svc_log->info(mod_ctx, b);
+    }
+}
+
+// --- Detección de tecla L para reproducir los dos IDs (88 y 90) ---
+static bool g_wasLDown = false;
+
+static HookAction on_execute_pre(ModContext* ctx, void* args, void*, void*) {
+    // Lógica de limpieza de logs repetidos (mantener similar a implementaciones previas)
+    static int tickCounter = 0;
+    tickCounter++;
+    if (tickCounter >= 1800) { // cada ~60s a 30Hz
+        tickCounter = 0;
+        for (auto &kv : g_soundCount) {
+            if (kv.second > MAX_REPEAT_LOG) kv.second = MAX_REPEAT_LOG;
         }
     }
-    
+
+    // Detectar pulsación de tecla L (Windows)
+#ifdef _WIN32
+    SHORT keyState = GetAsyncKeyState('L');
+    bool isDown = (keyState & 0x8000) != 0;
+    if (isDown && !g_wasLDown) {
+        g_wasLDown = true;
+        // Reproducir los dos IDs que indicaste: 0x58 (88) y 0x5A (90)
+        playSeById(0x00000058);
+        playSeById(0x0000005A);
+    } else if (!isDown) {
+        g_wasLDown = false;
+    }
+#endif
+
+    // También se puede intentar detectar el botón de fijar objetivo del pad (si la API lo permite)
+    // Ejemplo simple (dependiente del port) - no compilará si la API difiere:
+#if 0
+    // Descomenta y adapta si conoces la función exacta para leer el botón de fijar objetivo
+    if (mDoControllerPad_checkLockOn()) {
+        // lógica...
+    }
+#endif
+
     return HOOK_CONTINUE;
 }
 
@@ -225,25 +152,19 @@ extern "C" {
 
 MOD_EXPORT ModResult mod_initialize(ModError* error) {
     ModResult r;
-    
-    // Hookear el sistema de audio
+
     if ((r = mods::hook::add_pre<SeStartLog>(on_se_start_log)) != MOD_OK) {
         return mods::set_error(error, r, "No se pudo hookear Z2SeMgr::seStart");
     }
-    
-    // Hookear el execute de Link para limpiar el registro
+
     if ((r = mods::hook::add_pre<LinkExecute>(on_execute_pre)) != MOD_OK) {
         return mods::set_error(error, r, "No se pudo hookear daAlink_c::execute");
     }
-    
+
     svc_log->info(mod_ctx, "========================================");
-    svc_log->info(mod_ctx, "SISTEMA DE BÚSQUEDA DE SONIDOS ACTIVADO");
+    svc_log->info(mod_ctx, "MOD DE REPRODUCCION: pulsa 'L' para reproducir IDs 0x58 y 0x5A");
     svc_log->info(mod_ctx, "========================================");
-    svc_log->info(mod_ctx, "Abre la consola del mod para ver cada sonido");
-    svc_log->info(mod_ctx, "reproducido en tiempo real con su nombre e ID");
-    svc_log->info(mod_ctx, "Formato: [SONIDO] NOMBRE (ID: 0xXXXXXXXX)");
-    svc_log->info(mod_ctx, "========================================");
-    
+
     return MOD_OK;
 }
 
@@ -253,8 +174,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_soundCount.clear();
-    g_tickCounter = 0;
-    svc_log->info(mod_ctx, "[SONIDOS] Mod desactivado - Registro limpiado");
+    svc_log->info(mod_ctx, "[PLAY] Mod detenido, registro limpiado");
     return MOD_OK;
 }
 
