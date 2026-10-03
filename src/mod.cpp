@@ -1,5 +1,5 @@
 // Mod para reproducir sonidos por ID al presionar L (fijar objetivo)
-// Versión corregida: no llama a un método no-estático como si fuese static
+// Versión corregida según la firma real de Z2SeMgr::seStart.
 
 #include <unordered_map>
 #include <vector>
@@ -29,7 +29,7 @@ DEFINE_MOD();
 IMPORT_SERVICE(LogService, svc_log);
 IMPORT_SERVICE(HookService, svc_hook);
 
-// Hook definitions (captura de sonidos y tick de Link)
+// Hook definitions
 DEFINE_HOOK(&Z2SeMgr::seStart, SeStartLog);
 DEFINE_HOOK(&daAlink_c::execute, LinkExecute);
 
@@ -39,7 +39,13 @@ static std::map<uint32_t, std::string> g_soundNames = {
     {0x04000014, "LINK_LAND"},
     {0x04000015, "LINK_LAND_HEAVY"},
     {0x04000016, "LINK_HURT"},
-    // ...
+    {0x04000020, "GUARD_HIT"},
+    {0x04000030, "SWORD_SWING_1"},
+    {0x04000040, "BOW_DRAW"},
+    {0x04000050, "MAGIC_CAST"},
+    {0x04000090, "BOSS_APPEAR"},
+    {0x00000058, "TEST_ID_88"},
+    {0x0000005A, "TEST_ID_90"},
 };
 
 static std::map<uint32_t, int> g_soundCount;
@@ -83,7 +89,7 @@ static HookAction on_se_start_log(ModContext* ctx, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
-// --- Función de reproducción corregida: requiere una instancia real de Z2SeMgr ---
+// Firma real en Z2SeMgr: seStart(uint32_t, const Vec*, int, int, uint32_t, float, float, float, float)
 static void playSeById(Z2SeMgr* seMgr, uint32_t id) {
     if (seMgr == nullptr) {
         char b[128];
@@ -92,15 +98,15 @@ static void playSeById(Z2SeMgr* seMgr, uint32_t id) {
         return;
     }
 
-    // Este es el uso correcto del método no-estático:
-    seMgr->seStart(id, nullptr, 0, 0, 0, 1.0f);
+    // Llamada con la firma correcta: 9 argumentos, con posición nula y valores por defecto.
+    seMgr->seStart(id, nullptr, 0, 0, 0, 1.0f, 1.0f, 0.0f, 0.0f);
 
     char b[80];
     snprintf(b, sizeof(b), "[PLAY] solicitada reproduccion ID: 0x%08X", id);
     svc_log->info(mod_ctx, b);
 }
 
-// --- Detección de tecla L para reproducir los dos IDs del ejemplo ---
+// Detección de tecla L
 static bool g_wasLDown = false;
 
 static HookAction on_execute_pre(ModContext* ctx, void* args, void*, void*) {
@@ -119,8 +125,10 @@ static HookAction on_execute_pre(ModContext* ctx, void* args, void*, void*) {
     if (isDown && !g_wasLDown) {
         g_wasLDown = true;
 
-        // Importante: esto NO llama a un método static; requiere una instancia real.
-        // En esta compilación no hay instancia conocida del port, así que solo se loguea.
+        // Se requieren la instancia real del manager de audio del port.
+        // Si en tu port la instancia es accesible como `g_audioMgr` o `Z2GetAudioMgr()`, reemplaza aquí.
+        // Por ahora, sin instancia no puede dispararse el sonido real.
+        // Llamada de ejemplo ilustrativa: playSeById(g_audioMgr, 0x00000058);
         playSeById(nullptr, 0x00000058);
         playSeById(nullptr, 0x0000005A);
     } else if (!isDown) {
@@ -145,8 +153,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     svc_log->info(mod_ctx, "========================================");
-    svc_log->info(mod_ctx, "MOD DE REPRODUCCION: pulsar 'L' captura IDs 0x58 y 0x5A");
-    svc_log->info(mod_ctx, "El método Z2SeMgr::seStart requiere instancia real del audio manager");
+    svc_log->info(mod_ctx, "MOD DE REPRODUCCION: pulsa 'L' para probar IDs 0x58 y 0x5A");
+    svc_log->info(mod_ctx, "La firma real de Z2SeMgr::seStart requiere 9 argumentos");
     svc_log->info(mod_ctx, "========================================");
 
     return MOD_OK;
