@@ -1,6 +1,6 @@
 {
   "id": "com.example.my_mod",
-  "name": "My Mod",
+  "name": "sound",
   "version": "@PROJECT_VERSION@",
   "author": "You",
   "description": "An example Dusklight mod"
